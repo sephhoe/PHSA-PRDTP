@@ -1,0 +1,97 @@
+---
+title: "PRDTP RBA - Simple analysis"
+author: "Joseph"
+date: "2024-01-25"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, library and global functions}
+library(dplyr)
+library(readxl)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(openxlsx)
+library(pROC)
+library(doParallel)
+library(foreach)
+library(ggpubr)
+
+
+# setting work directory
+  # setwd("//phsahome2.phsabc.ehcnet.ca/joseph.ho/Profile/Desktop/PHSA")
+  setwd("C:/Users/Joseph/Desktop/PHSA")
+
+```
+
+```{r, input}
+
+# input dataframe
+inp_df <-  
+  
+# input
+  p.vegf_less15 <- 0.95 # MARINA
+  p.ctrl_less15 <- 0.62 # MARINA
+  
+  RR.gsurg <- 2.45
+    
+  p.vegf_gsurg <- 0.001 * RR.gsurg
+  p.ctrl_gsurg <- 0.001
+
+```
+
+```{r, PSA input}
+
+# creating the test parameter sheet 
+  psa_param <- read_excel("PRDTP/Literature/prdtpparameters.xlsx", sheet = "SA_Test") %>% 
+  mutate(var = se^2)
+
+## generating alpha and beta parameters
+    estBetaParams <- function(mu, var) {
+    alpha <- ((1 - mu) / var - 1 / mu) * mu ^ 2
+    beta <- alpha * (1 / mu - 1)
+    return(params = list(alpha = alpha, beta = beta))
+  }
+  
+  estGammaParams <- function(mu, var) {
+    beta <- var/mu
+    alpha <- mu/beta
+    return(params = list(alpha = alpha, beta = beta))
+  }
+  
+
+f_gen_psa <- function(n_sim = 1000){
+  
+  require(truncnorm)
+  require(gtools)
+  
+  p.vegf_less15 <- rbeta(n = n_sim, shape1 = psa_param[["p.H0_AC"]][["S1"]], shape2 = psa_param[["p.H0_AC"]][["S2"]])
+  
+  p.SYM_AC <- rbeta(n = n_sim,
+                    shape1 = psa_param[["p.SYM_AC"]][["S1"]],
+                    shape2 = psa_param[["p.SYM_AC"]][["S2"]])
+  
+  p.H1_AC <- rbeta(n = n_sim,
+                    shape1 = psa_param[["p.H1_AC"]][["S1"]],
+                    shape2 = psa_param[["p.H1_AC"]][["S2"]])
+
+}
+
+```
+
+
+```{r, point analysis}
+
+# IRBR
+  w.rb <- 1
+
+IRBR <- ((p.vegf_gsurg - p.ctrl_gsurg))/(p.vegf_less15 - p.ctrl_less15)
+
+```
+
+```{r, PSM}
+
+```
+
