@@ -47,21 +47,52 @@ inp_df <-
 # creating the test parameter sheet 
   psa_param <- read_excel("PRDTP/Literature/prdtpparameters.xlsx", sheet = "SA_Test") %>% 
   mutate(var = se^2)
+    
 
-## generating alpha and beta parameters
-    estBetaParams <- function(mu, var) {
+
+psa_calc.fxn <- function(distribution, mu, var) {
+  mu <- as.numeric(mu)  # Ensure mu is numeric
+  var <- as.numeric(var)  # Ensure var is numeric
+  
+  if (distribution == "beta") {
     alpha <- ((1 - mu) / var - 1 / mu) * mu ^ 2
     beta <- alpha * (1 / mu - 1)
-    return(params = list(alpha = alpha, beta = beta))
+  } 
+  
+  else if (distribution == "gamma") {
+    beta <- var / mu
+    alpha <- mu / beta
   }
   
-  estGammaParams <- function(mu, var) {
-    beta <- var/mu
-    alpha <- mu/beta
-    return(params = list(alpha = alpha, beta = beta))
+  else if (distribution == "log-normal") {
+    se = sqrt(var)
+    
+    
+    beta <- var / mu
+    alpha <- mu / beta
   }
-  
 
+  else {
+    alpha <- NA
+    beta <- NA
+  }
+  
+  return(params = list(alpha = alpha, beta = beta))
+}
+
+
+t <- psa_calc.fxn("beta", 0.311, 0.00311^2)
+
+t2 <- psa_param %>%
+  rowwise() %>%
+  mutate(params = list(psa_calc.fxn(distribution, mu, var))) %>%
+  mutate(alpha = params$alpha, beta = params$beta) %>%
+  select(-params)
+
+
+
+  
+  
 f_gen_psa <- function(n_sim = 1000){
   
   require(truncnorm)
