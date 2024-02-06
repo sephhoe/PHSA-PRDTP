@@ -6,7 +6,7 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 ---
-
+*Library and global functions*
 ```{r, library and global functions}
 library(dplyr)
 library(readxl)
@@ -24,35 +24,54 @@ library(ggpubr)
   # setwd("//phsahome2.phsabc.ehcnet.ca/joseph.ho/Profile/Desktop/PHSA")
   setwd("C:/Users/Joseph/Desktop/PHSA")
 
+  
+# setting save paths
+  sample <- "PRDTP/SampleAnalysis-RBA/"
+  save <- function(t, auto = sample){
+    paste0(auto, t)
+  }  
 ```
 
-```{r, input}
+*Model input*
+```{r, base-case input}
 
 # input dataframe
-inp_df <-  
   
 # input
+
+f_gen_base <- function(){
+  
   p.vegf_less15 <- 0.95 # MARINA
   p.ctrl_less15 <- 0.62 # MARINA
   
   RR.gsurg <- 2.45
     
-  p.vegf_gsurg <- 0.001 * RR.gsurg
-  p.ctrl_gsurg <- 0.001
+  p.ctrl_gsurg <- 0.1
+  
+  
+  df_base <- data.frame(
+  p.vegf_less15,
+  p.ctrl_less15,
+  RR.gsurg,
+  p.ctrl_gsurg
+  )  
+  
+return(df_base)
+  
+}
+
 
 ```
-
 ```{r, PSA input}
 
 # creating the test parameter sheet 
-  psa_param <- read_excel("PRDTP/Literature/prdtpparameters.xlsx", sheet = "SA_Test") %>% 
+  psa_param_raw <- read_excel("PRDTP/Literature/prdtpparameters.xlsx", sheet = "SA_Test") %>% 
   mutate(var = se^2)
-    
 
-
-psa_calc.fxn <- function(distribution, mu, var) {
-  mu <- as.numeric(mu)  # Ensure mu is numeric
-  var <- as.numeric(var)  # Ensure var is numeric
+## psa calculating function    
+  psa_calc.fxn <- function(distribution, mu, var) {
+  mu <- as.numeric(mu)  
+  var <- as.numeric(var)  
   
   if (distribution == "beta") {
     alpha <- ((1 - mu) / var - 1 / mu) * mu ^ 2
@@ -65,11 +84,14 @@ psa_calc.fxn <- function(distribution, mu, var) {
   }
   
   else if (distribution == "log-normal") {
+    
+    # calcualting the upr limit first
     se = sqrt(var)
+    upr = log(mu + se*1.96)
     
+    alpha <- log(mu)
+    beta <- (upr - alpha)/1.96
     
-    beta <- var / mu
-    alpha <- mu / beta
   }
 
   else {
@@ -80,49 +102,263 @@ psa_calc.fxn <- function(distribution, mu, var) {
   return(params = list(alpha = alpha, beta = beta))
 }
 
+## param sheet with alpha and beta  
+  psa_param <- psa_param_raw %>%
+    rowwise() %>%
+    mutate(params = list(psa_calc.fxn(distribution, mu, var))) %>%
+    mutate(alpha = params$alpha, beta = params$beta) %>%
+    select(-params)
 
-t <- psa_calc.fxn("beta", 0.311, 0.00311^2)
-
-t2 <- psa_param %>%
-  rowwise() %>%
-  mutate(params = list(psa_calc.fxn(distribution, mu, var))) %>%
-  mutate(alpha = params$alpha, beta = params$beta) %>%
-  select(-params)
-
-
-
+# converting PSA table to a list
+  psa_tib <- as_tibble(t(psa_param %>% select(Parameter, alpha, beta))) # transposing table
   
+  names(psa_tib) <- psa_tib[1,] # setting first row as the colnames
+  psa_tib<- psa_tib[-1,] # removing first row
   
+  psa_tib <- mutate_all(psa_tib, function(x) as.numeric(as.character(x))) # converting values back to numeric
+  rownames(psa_tib)<- c("S1", "S2")
+
+  psa_param_list <- apply(psa_tib,2,as.list)
+  rm(psa_tib)
+  
+
+
+# generating psa parameters  
 f_gen_psa <- function(n_sim = 1000){
   
   require(truncnorm)
   require(gtools)
+
+# proportion of people with loss of less than 15 letters 
+  p.vegf_less15 <- rbeta(n = n_sim,
+                         shape1 = psa_param_list[["p.vegf_less15"]][["S1"]],
+                         shape2 = psa_param_list[["p.vegf_less15"]][["S2"]])
   
-  p.vegf_less15 <- rbeta(n = n_sim, shape1 = psa_param[["p.H0_AC"]][["S1"]], shape2 = psa_param[["p.H0_AC"]][["S2"]])
   
-  p.SYM_AC <- rbeta(n = n_sim,
-                    shape1 = psa_param[["p.SYM_AC"]][["S1"]],
-                    shape2 = psa_param[["p.SYM_AC"]][["S2"]])
+  p.ctrl_less15 <- rbeta(n = n_sim,
+                         shape1 = psa_param_list[["p.ctrl_less15"]][["S1"]],
+                         shape2 = psa_param_list[["p.ctrl_less15"]][["S2"]])
   
-  p.H1_AC <- rbeta(n = n_sim,
-                    shape1 = psa_param[["p.H1_AC"]][["S1"]],
-                    shape2 = psa_param[["p.H1_AC"]][["S2"]])
+
+# glaucoma surgery
+
+## RR for glaucoma surgery    
+  RR.gsurg <- rlnorm(n = n_sim,
+                    meanlog = psa_param_list[["RR.gsurg"]][["S1"]],
+                    sdlog = psa_param_list[["RR.gsurg"]][["S2"]])
+  
+## proportion of glaucoma surgery
+  p.ctrl_gsurg <- rbeta(n = n_sim,
+                         shape1 = psa_param_list[["p.ctrl_gsurg"]][["S1"]],
+                         shape2 = psa_param_list[["p.ctrl_gsurg"]][["S2"]])
+  
+#########################
+df_psa <- data.frame(
+  p.vegf_less15,
+  p.ctrl_less15,
+  RR.gsurg,
+  p.ctrl_gsurg
+  )  
+  
+return(df_psa)
 
 }
 
+
+t<-f_gen_psa()
 ```
 
+*Model functions*
+```{r, IRBR model }
 
-```{r, point analysis}
+IRBR.mod <- function(params){
+  
+  with(as.list(params),{  
 
-# IRBR
-  w.rb <- 1
+   IRBR <- ((p.ctrl_gsurg*RR.gsurg - p.ctrl_gsurg))/(p.vegf_less15 - p.ctrl_less15) # incremental risk-benefit ratio
+   
+   risk_diff <- (p.ctrl_gsurg*RR.gsurg - p.ctrl_gsurg)
+   ben_diff <- (p.vegf_less15 - p.ctrl_less15)
+   
+   results <- c("risk" = risk_diff, "benefit" = ben_diff, "IRBR" = IRBR)
+   
+   return(results)
+ 
+   }) # end with function
+}
 
-IRBR <- ((p.vegf_gsurg - p.ctrl_gsurg))/(p.vegf_less15 - p.ctrl_less15)
+as.data.frame(t(IRBR.mod(f_gen_base())))
+
+```
+```{r, Wrapper function }
+ f_wrapper <- function(fxn=f_gen_base(), n_sim = 1){
+    
+    require(readr)
+    require(tidyverse)
+
+  ### Reading in enviroment 
+    environment(fxn) <- environment()
+    environment(IRBR.mod) <- environment()
+    
+#PSA parameters
+    df_psa <- fxn
+    
+    #--  Run PSA  --#
+    
+    # Initialize matrix of results outcomes
+    m_out <- matrix(NaN, 
+                    nrow = n_sim, 
+                    ncol = 3,
+                    dimnames = list(1:n_sim,
+                                    c("Risk", "Benefit",
+                                      "IRBR")))
+    
+    # run model for each row of PSA inputs
+    for(t in 1:n_sim){
+      
+      # store results in row of results matrix
+      m_out[t,] <- IRBR.mod(df_psa[t,])
+    } # close model loop
+    
+    
+    #-- Return results --#
+    
+    # convert matrix to dataframe (for plots)
+    df_out <- as.data.frame(m_out) 
+    
+    # output the dataframe from the function  
+    return(df_out) 
+    
+  } # end of function
 
 ```
 
-```{r, PSM}
+*Output*
+```{r, risk-benefit output}
+base <- f_wrapper()
+PSA <- f_wrapper(fxn = f_gen_psa(), n_sim = 1000)
+
+```
+
+*plotting*
+```{r, CEA plotting}
+
+CEA_plot <- function(df, x, y){
+      
+      p1 <- ggplot(df, aes(x = .data[[x]], y = .data[[y]])) +
+        geom_point(shape = 1) +
+        stat_ellipse() +
+        geom_hline(yintercept = 0) +
+        geom_vline(xintercept = 0) +
+    geom_abline(slope = 1, intercept = 0, color = "gray") +  # Add a line with slope 1
+    # geom_abline(slope = 2, intercept = 0, color = "gray") +  # Add a line with slope 1
+    # geom_abline(slope = 4, intercept = 0, color = "gray") +  # Add a line with slope 1
+    geom_abline(slope = 0.5, intercept = 0, color = "gray") +  # Add a line with slope 1
+    geom_abline(slope = 0.25, intercept = 0, color = "gray") +  # Add a line with slope 1
+    scale_x_continuous(limits = c(-1, 1)) +  
+    scale_y_continuous(limits = c(-1, 1)) +  
+    theme_bw() +
+      theme(
+      panel.border = element_blank(),
+      panel.grid.major = element_blank(),
+      # panel.grid.major.y = element_line(color = "gray"),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 22),
+      legend.position = 'top',
+      legend.title = element_blank(),
+      legend.text = element_text(size = 16),
+      axis.text.x = element_text(size = 16, angle = 45, hjust = 1),  # Adjust the font size as needed
+      axis.text.y = element_text(size = 16),
+      axis.title.x = element_text(margin = margin(r = 10), size = 22),
+      axis.title.y = element_text(margin = margin(r = 10), size = 22)
+    ) 
+        
+    return(p1)
+    }
+      
+
+  base_plot <- CEA_plot(base, x = "Benefit", y = "Risk") + coord_cartesian(ylim = c(-0.1, 0.5), xlim = c(0,0.5)) +
+    ylab("Incremental Risk") + xlab("Incremental Benefit") +
+    annotate("text", x = 0.1, y = 0.13, label = "µ = 1", color = "gray", angle = 30, size = 6) +
+    annotate("text", x = 0.15, y = 0.10, label = "µ = 0.5", color = "gray", angle = 16, size = 6) +
+    annotate("text", x = 0.2, y = 0.075, label = "µ = 0.25", color = "gray", angle = 8, size = 6) +
+    annotate("text", x = 0.38, y = 0.145, label = "(0.33, 0.145)", color = "black", size = 6)
+
+   ggsave(save("IRBR-PlanePlot_base.png"), height = 7, width = 11, plot = base_plot, dpi=300)
+
+    
+  
+PSA_plot <- CEA_plot(PSA, x = "Benefit", y = "Risk") + coord_cartesian(ylim = c(-0.1, 0.5), xlim = c(0,0.5)) +
+    ylab("Incremental Risk") + xlab("Incremental Benefit") +
+    annotate("text", x = 0.1, y = 0.13, label = "µ = 1", color = "gray", angle = 30, size = 6) +
+    annotate("text", x = 0.15, y = 0.10, label = "µ = 0.5", color = "gray", angle = 16, size = 6) +
+    annotate("text", x = 0.2, y = 0.075, label = "µ = 0.25", color = "gray", angle = 8, size = 6)
+
+   ggsave(save("IRBR-PlanePlot_PSA.png"), height = 7, width = 11, plot = PSA_plot, dpi=300)
+
+```
+
+```{r, CEAC}
+
+# CEAC function
+  CEAC_dfgen.fxn <- function(risk, benefit){
+  
+    WTP <- seq(from=0, to=1, by=0.05)
+
+
+   #INMB matrix
+    ceac.m <- data.frame(matrix(nrow=1000, ncol=length(WTP)))
+    for(i in 1:length(WTP)){
+    ceac.m[,i] <- benefit*WTP[i] - risk
+    }
+  
+  #CEAC proportions
+    ceac.prop <- data.frame(matrix(nrow=1, ncol=length(WTP)))
+    for(i in 1:length(WTP)){
+      ceac.prop[,i] <- sum(ceac.m[,i]>0) 
+    }
+  
+      ceac.prop <- as_tibble(t(ceac.prop/1000)) %>% rename(prop = V1)
+      ceac.prop$WTP <- WTP
+      
+  l<-list(matrix = ceac.m, prop = ceac.prop)
+  }
+
+# CEAC list
+  CEAC_list <- CEAC_dfgen.fxn(PSA$Risk, PSA$Benefit)
+
+
+CEAC_plot.fxn <- function(df, x, y){
+
+   #Plotting 
+     p <- ggplot(df, aes(x = .data[[x]], y = .data[[y]])) +
+      geom_line() + #linetype="dashed", position=position_jitter(w=50000,h=0))+
+      ylim(0,1) +
+      theme_bw() +
+      theme(
+      panel.border = element_blank(),
+      panel.grid.major = element_blank(),
+      # panel.grid.major.y = element_line(color = "gray"),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 22),
+      legend.position = 'top',
+      legend.title = element_blank(),
+      legend.text = element_text(size = 16),
+      axis.text.x = element_text(size = 16, angle = 45, hjust = 1),  # Adjust the font size as needed
+      axis.text.y = element_text(size = 16),
+      axis.title.x = element_text(margin = margin(r = 10), size = 22),
+      axis.title.y = element_text(margin = margin(r = 10), size = 22))
+
+return(p)     
+}
+
+PSA_CEAC_plot <- CEAC_plot.fxn(CEAC_list[["prop"]], x = "WTP", y = "prop") + ylab("Proportion where Benefit > Risk") + xlab("Threshold µ") +
+  geom_vline(xintercept = 0.435, linetype = "dashed", color = "red") +
+  annotate("text", x = 0.60, y = 0.5, label = "(0.44, 0.50)", color = "black", size = 6)
+
+ggsave(save("IRBR-CEACPlot_PSA.png"), height = 7, width = 11, plot = PSA_CEAC_plot, dpi=300)
 
 ```
 
